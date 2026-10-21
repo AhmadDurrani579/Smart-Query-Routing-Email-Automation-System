@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Gmail OAuth credentials
+credentials.json
+token.json
+token.json.*
+client_secret*.json
+
+# Temporary Google Login
+google-login-test/
+
+# Node.js
+node_modules/
+dist/
+
+# Logs
+*.log
