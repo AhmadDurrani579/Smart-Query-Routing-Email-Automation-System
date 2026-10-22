@@ -59,10 +59,21 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class LoginUserResponse(BaseModel):
+    id: int
+    full_name: str | None
+    email: EmailStr
+    role: str
+    department_id: int | None
+    approval_status: str | None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    user: LoginUserResponse
+
 
 
 class RefreshTokenRequest(BaseModel):

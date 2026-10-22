@@ -103,8 +103,17 @@ def login_user(db: Session, data: LoginRequest):
     refresh_token = create_refresh_token(user.id)
 
     # 6. Return tokens
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role,
+            "department_id": user.department_id,
+            "approval_status": user.approval_status,
+        }
     }

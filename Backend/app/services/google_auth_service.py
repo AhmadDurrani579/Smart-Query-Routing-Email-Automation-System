@@ -137,10 +137,19 @@ def login_with_google(db: Session, token: str):
             detail="Your account is inactive",
         )
 
+
     return {
         "access_token": create_access_token(user.id),
         "refresh_token": create_refresh_token(user.id),
         "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role,
+            "department_id": user.department_id,
+            "approval_status": user.approval_status,
+        }
     }
 
 
