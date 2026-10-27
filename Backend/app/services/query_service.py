@@ -70,7 +70,7 @@ def get_query_details(
             return query
 
     # Staff can view queries from their department.
-    if current_user.role in {"INSTRUCTOR", "HOD"}:
+    if current_user.role in {"EXAM_STAFF", "FINANCE_STAFF", "IT_STAFF", "HOD"}:
         if (
             current_user.department_id is not None
             and query.department_id == current_user.department_id
@@ -107,7 +107,7 @@ def require_query_handler(
         return
 
     # Only department staff may manage regular queries.
-    if current_user.role not in {"INSTRUCTOR", "HOD"}:
+    if current_user.role not in {"EXAM_STAFF", "FINANCE_STAFF", "IT_STAFF", "HOD"}:
         raise HTTPException(
             status_code=403,
             detail="You cannot manage this query"
@@ -201,7 +201,7 @@ def reply_to_query(
         )
 
         # Queue an email when authorised staff replies
-        if current_user.role in {"INSTRUCTOR", "HOD", "ADMIN"}:
+        if current_user.role in {"EXAM_STAFF", "FINANCE_STAFF", "IT_STAFF", "HOD", "ADMIN"}:
             student = db.get(User, query.student_id)
 
             if student and student.email:
@@ -271,7 +271,7 @@ def update_query_status(
     )
 
     # Only authorised staff can change query status
-    if current_user.role not in {"INSTRUCTOR", "HOD", "ADMIN"}:
+    if current_user.role not in {"EXAM_STAFF", "FINANCE_STAFF", "IT_STAFF", "HOD", "ADMIN"}:
         raise HTTPException(
             status_code=403,
             detail="Only authorised staff can update query status"

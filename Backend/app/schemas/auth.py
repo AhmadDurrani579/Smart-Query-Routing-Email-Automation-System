@@ -12,9 +12,10 @@ from pydantic import (
 
 class SignupRole(str, Enum):
     STUDENT = "STUDENT"
-    INSTRUCTOR = "INSTRUCTOR"
     HOD = "HOD"
-
+    EXAM_STAFF = "EXAM_STAFF"
+    FINANCE_STAFF = "FINANCE_STAFF"
+    IT_STAFF = "IT_STAFF"
 
 class SignupRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)

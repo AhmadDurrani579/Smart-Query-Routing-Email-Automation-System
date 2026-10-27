@@ -16,7 +16,9 @@ def get_department_notification_recipients(
         .where(
             User.department_id == department_id,
             User.role.in_([
-                UserRole.INSTRUCTOR.value,
+                UserRole.EXAM_STAFF.value,
+                UserRole.FINANCE_STAFF.value,
+                UserRole.IT_STAFF.value,
                 UserRole.HOD.value
             ]),
             User.is_active.is_(True),

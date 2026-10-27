@@ -146,7 +146,7 @@ def list_department_queries(
     ],
     db: Annotated[Session, Depends(get_db)]
 ):
-    if current_user.role not in {"INSTRUCTOR", "HOD"}:
+    if current_user.role not in {"EXAM_STAFF", "IT_STAFF", "FINANCE_STAFF", "HOD"}:
         raise HTTPException(
             status_code=403,
             detail="Only department staff can view department queries"

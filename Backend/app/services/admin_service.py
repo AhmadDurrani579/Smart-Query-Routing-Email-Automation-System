@@ -11,8 +11,10 @@ from app.models.department import Department
 
 ALLOWED_REQUESTED_ROLES = {
     UserRole.STUDENT.value,
-    UserRole.INSTRUCTOR.value,
     UserRole.HOD.value,
+    UserRole.EXAM_STAFF.value,
+    UserRole.FINANCE_STAFF.value,
+    UserRole.IT_STAFF.value,
 }
 
 
@@ -120,7 +122,7 @@ def assign_staff_department(
         )
 
     # 2. Check the user's role
-    if user.role not in {"INSTRUCTOR", "HOD"}:
+    if user.role not in {"EXAM_STAFF", "FINANCE_STAFF", "IT_STAFF", "HOD"}:
         raise HTTPException(
             status_code=403,
             detail="Only Instructors and HODs can be assigned departments"
