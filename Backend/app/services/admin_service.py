@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from app.models.department import Department
 from sqlalchemy import func, or_
 from app.schemas.admin_user import AdminUserResponse
+from app.services.audit_service import record_audit_event
 
 ALLOWED_REQUESTED_ROLES = {
     UserRole.STUDENT.value,
@@ -58,6 +59,21 @@ def approve_user(
     user.approval_status = "APPROVED"
     user.is_active = True
     user.approved_by = admin_id
+    record_audit_event(
+        db=db,
+        actor_id=admin_id,
+        action="USER_APPROVED",
+        entity_type="USER",
+        entity_id=user.id,
+        old_values={
+            "approval_status": "PENDING"
+        },
+        new_values={
+            "approval_status": "APPROVED",
+            "role": user.role,
+            "is_active": True
+        }
+    )
 
     try:
         db.commit()
@@ -98,6 +114,20 @@ def reject_user(
     user.approval_status = "REJECTED"
     user.is_active = False
     user.approved_by = admin_id
+    record_audit_event(
+        db=db,
+        actor_id=admin_id,
+        action="USER_REJECTED",
+        entity_type="USER",
+        entity_id=user.id,
+        old_values={
+            "approval_status": "PENDING"
+        },
+        new_values={
+            "approval_status": "REJECTED",
+            "is_active": False
+        }
+    )
 
     try:
         db.commit()
@@ -112,7 +142,8 @@ def reject_user(
 def assign_staff_department(
     db: Session,
     user_id: int,
-    department_id: int
+    department_id: int,
+    admin_id: int
 ):
     # 1. Find the staff member
     user = db.get(User, user_id)
@@ -186,9 +217,25 @@ def assign_staff_department(
         )
 
     # 7. Assign department
+    old_department_id = user.department_id
     user.department_id = department.id
     user.updated_at = datetime.now(timezone.utc)
 
+    record_audit_event(
+        db=db,
+        actor_id=admin_id,
+        action="STAFF_DEPARTMENT_ASSIGNED",
+        entity_type="USER",
+        entity_id=user.id,
+        old_values={
+            "department_id": old_department_id
+        },
+        new_values={
+            "department_id": department.id,
+            "department_name": department.name
+        }
+    )
+    
     try:
         db.commit()
         db.refresh(user)

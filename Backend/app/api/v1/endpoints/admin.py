@@ -111,5 +111,6 @@ def assign_department_to_staff(
     return assign_staff_department(
         db=db,
         user_id=user_id,
-        department_id=data.department_id
+        department_id=data.department_id,
+        admin_id=admin.id
     )
