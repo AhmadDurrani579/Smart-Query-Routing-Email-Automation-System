@@ -162,6 +162,36 @@ def get_admin_dashboard_summary(
     ]
 
 
+    # Department workload: total queries assigned to each department
+    department_rows = db.execute(
+        select(
+            Department.name,
+            func.count(Query.id).label("query_count")
+        )
+        .outerjoin(
+            Query,
+            Query.department_id == Department.id
+        )
+        .group_by(
+            Department.id,
+            Department.name
+        )
+        .order_by(
+            func.count(Query.id).desc(),
+            Department.name
+        )
+    ).all()
+
+    department_workload = [
+        {
+            "name": name,
+            "value": count
+        }
+        for name, count in department_rows
+    ]
+
+
+
     return {
         "total_queries": total_queries,
         "open_queries": open_queries,
@@ -174,5 +204,6 @@ def get_admin_dashboard_summary(
             float(avg_resolution_hours or 0), 2
         ),
         "query_activity": query_activity,
-        "query_status": query_status
+        "query_status": query_status,
+        "department_workload": department_workload
     }
