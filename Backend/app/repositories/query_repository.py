@@ -1,6 +1,7 @@
 
 from sqlalchemy.orm import Session
 
+from Backend.app.schemas.admin_query import AdminQueryResponse
 from app.models.query import Query
 from sqlalchemy import select
 from datetime import timedelta
@@ -9,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.query import Query
-
+from app.models.department import Department
 
 
 def create_query(
@@ -154,12 +155,48 @@ def get_all_queries_for_admin(
         .limit(page_size)
     )
 
+
+    # 1. Retrieve queries from database
     queries = db.scalars(stmt).all()
 
+    # 2. Collect department IDs
+    department_ids = {
+        query.department_id
+        for query in queries
+        if query.department_id is not None
+    }
+
+    # 3. Retrieve department names
+    department_names = {}
+
+    if department_ids:
+        departments = db.scalars(
+            select(Department).where(
+                Department.id.in_(department_ids)
+            )
+        ).all()
+
+        department_names = {
+            department.id: department.name
+            for department in departments
+        }
+
+    # 4. Add department name to each query
+    query_results = [
+        {
+            **AdminQueryResponse.model_validate(query).model_dump(),
+            "department_name": department_names.get(
+                query.department_id
+            )
+        }
+        for query in queries
+    ]
+
+    # 5. Return paginated results
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size,
-        "queries": queries,
+        "queries": query_results,
     }
