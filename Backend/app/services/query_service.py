@@ -28,6 +28,7 @@ from app.models.query import Query
 from app.repositories.query_repository import save_classification
 from app.services.gemini_service import classify_student_query
 from app.services.n8n_service import send_n8n_event
+from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,18 @@ def submit_student_query(
         student_id=student_id,
         message=message
     )
+
+    create_notification(
+        db=db,
+        recipient_id=student_id,
+        notification_type="QUERY_SUBMITTED",
+        title="Query submitted successfully",
+        message=f"Your query #{query.id} has been submitted.",
+        entity_type="QUERY",
+        entity_id=query.id,
+    )
+
+    db.commit()
 
     query_id = query.id
 

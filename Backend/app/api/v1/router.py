@@ -13,7 +13,8 @@ from app.api.v1.endpoints import (
     admin_announcements,
     announcements,
     admin_audit_logs,
-    student_dashboard
+    student_dashboard,
+    notifications
 )
 
 api_router = APIRouter()
@@ -32,3 +33,4 @@ api_router.include_router(admin_announcements.router)
 api_router.include_router(announcements.router)
 api_router.include_router(admin_audit_logs.router)
 api_router.include_router(student_dashboard.router)
+api_router.include_router(notifications.router)
