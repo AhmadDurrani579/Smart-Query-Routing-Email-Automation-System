@@ -23,24 +23,89 @@ from app.repositories.email_notification_repository import (
 from sqlalchemy import select
 from app.models.query_escalation import QueryEscalation
 
+from app.db.session import SessionLocal
+from app.models.query import Query
+from app.repositories.query_repository import save_classification
+from app.services.gemini_service import classify_student_query
+from app.services.n8n_service import send_n8n_event
+
 logger = logging.getLogger(__name__)
+
 
 def submit_student_query(
     db: Session,
     student_id: int,
     message: str
 ):
-    # Save the query in Neon.
-    # create_query() commits the record.
+    # 1. Save the student query first.
     query = create_query(
         db=db,
         student_id=student_id,
         message=message
     )
 
-    # Gemini classification is now handled
-    # by the background classification worker.
-    return query
+    query_id = query.id
+
+    # 2. Automatically classify using Gemini.
+    try:
+        # Use a separate session for the AI classification,
+        # following the existing worker design.
+        with SessionLocal() as classification_db:
+            classification = classify_student_query(
+                db=classification_db,
+                query=message
+            )
+
+        # 3. Save Gemini's classification.
+        with SessionLocal() as classification_db:
+            saved_query = classification_db.get(Query, query_id)
+
+            if (
+                saved_query is not None
+                and saved_query.status == "PENDING_CLASSIFICATION"
+                and not saved_query.needs_manual_review
+            ):
+                save_classification(
+                    db=classification_db,
+                    query=saved_query,
+                    classification=classification
+                )
+
+        # 4. Notify n8n if classification succeeded.
+        if not classification.needs_manual_review:
+            try:
+                sent = send_n8n_event(
+                    event="QUERY_CLASSIFIED",
+                    query_id=query_id,
+                    department_id=classification.department_id,
+                    priority=classification.priority
+                )
+
+                if not sent:
+                    logger.warning(
+                        "Query %s classified but n8n notification failed",
+                        query_id
+                    )
+            except Exception:
+                logger.exception(
+                    "n8n notification failed for query %s",
+                    query_id
+                )
+
+    except Exception:
+        logger.exception(
+            "Automatic Gemini classification failed for query %s",
+            query_id
+        )
+
+        # The query remains saved as PENDING_CLASSIFICATION.
+        # A worker can retry it later.
+
+    # 5. Reload the updated query from Neon.
+    db.expire_all()
+    updated_query = db.get(Query, query_id)
+
+    return updated_query
 
 
 
