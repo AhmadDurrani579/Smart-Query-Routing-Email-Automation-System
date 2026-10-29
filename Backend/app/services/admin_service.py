@@ -140,6 +140,7 @@ def assign_staff_department(
             detail="Staff account must be active and approved"
         )
 
+
     # 4. Verify the department
     department = db.get(Department, department_id)
 
@@ -155,14 +156,36 @@ def assign_staff_department(
             detail="Cannot assign an inactive department"
         )
 
-    # 5. Avoid unnecessary updates
+    # 5. Validate staff role against department
+    role_department_names = {
+        "EXAM_STAFF": {"EXAM", "EXAMINATION", "EXAMINATIONS"},
+        "FINANCE_STAFF": {"FINANCE"},
+        "IT_STAFF": {"IT", "INFORMATION TECHNOLOGY"},
+    }
+
+    allowed_names = role_department_names.get(user.role)
+
+    if allowed_names is not None:
+        department_name = (department.name or "").strip().upper()
+        department_code = (department.code or "").strip().upper()
+
+        if (
+            department_name not in allowed_names
+            and department_code not in allowed_names
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=f"{user.role} cannot be assigned to {department.name}"
+            )
+
+    # 6. Avoid unnecessary updates
     if user.department_id == department_id:
         raise HTTPException(
             status_code=409,
             detail="Staff member is already assigned to this department"
         )
 
-    # 6. Assign department
+    # 7. Assign department
     user.department_id = department.id
     user.updated_at = datetime.now(timezone.utc)
 
