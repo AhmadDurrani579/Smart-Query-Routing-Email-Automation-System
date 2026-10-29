@@ -1,7 +1,7 @@
 
 from sqlalchemy.orm import Session
 
-from Backend.app.schemas.admin_query import AdminQueryResponse
+from app.schemas.admin_query import AdminQueryResponse
 from app.models.query import Query
 from sqlalchemy import select
 from datetime import timedelta
