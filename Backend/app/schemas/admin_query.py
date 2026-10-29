@@ -24,7 +24,7 @@ class AdminQueryResponse(BaseModel):
     resolved_at: datetime | None
     first_response_due_at: datetime | None
     escalation_level: int
-
+    department_name: str | None = None
 
 class AdminQueryListResponse(BaseModel):
     total: int
