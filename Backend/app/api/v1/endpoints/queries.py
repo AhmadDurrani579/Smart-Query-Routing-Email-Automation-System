@@ -39,6 +39,8 @@ from app.schemas.query_escalation import (
     EscalatedQueryResponse,
     EscalationHistoryResponse,
 )
+from sqlalchemy import select
+from app.models.department import Department
 
 router = APIRouter(
     prefix="/queries",
@@ -113,6 +115,7 @@ def list_query_messages(
 
 
 # 1. Student query history
+
 @router.get(
     "/my",
     response_model=list[QueryResponse]
@@ -129,10 +132,44 @@ def list_my_queries(
             detail="Only students can view their query history"
         )
 
-    return get_student_queries(
+    # 1. Get only the logged-in student's queries
+    queries = get_student_queries(
         db=db,
         student_id=current_user.id
     )
+
+    # 2. Collect department IDs
+    department_ids = {
+        query.department_id
+        for query in queries
+        if query.department_id is not None
+    }
+
+    # 3. Look up department names
+    department_names = {}
+
+    if department_ids:
+        departments = db.scalars(
+            select(Department).where(
+                Department.id.in_(department_ids)
+            )
+        ).all()
+
+        department_names = {
+            department.id: department.name
+            for department in departments
+        }
+
+    # 4. Return queries with department names
+    return [
+        {
+            **QueryResponse.model_validate(query).model_dump(),
+            "department_name": department_names.get(
+                query.department_id
+            )
+        }
+        for query in queries
+    ]
 
 
 # 2. Department query listing

@@ -21,6 +21,7 @@ class QueryResponse(BaseModel):
     subject: str | None
     message: str
     department_id: int | None
+    department_name: str | None = None
     intent: str | None
     priority: str | None
     status: str
