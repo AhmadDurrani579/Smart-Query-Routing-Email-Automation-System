@@ -8,6 +8,8 @@ from app.models.user import User
 
 from datetime import datetime, timezone
 from app.models.department import Department
+from sqlalchemy import func, or_
+from app.schemas.admin_user import AdminUserResponse
 
 ALLOWED_REQUESTED_ROLES = {
     UserRole.STUDENT.value,
@@ -178,4 +180,78 @@ def assign_staff_department(
         "department_id": department.id,
         "department_name": department.name,
         "message": "Staff department assigned successfully"
+    }
+
+
+def get_admin_users(
+    db: Session,
+    page: int = 1,
+    page_size: int = 10,
+    search: str | None = None,
+    role: str | None = None,
+    approval_status: str | None = None,
+):
+    conditions = []
+
+    if search and search.strip():
+        search_term = f"%{search.strip()}%"
+
+        conditions.append(
+            or_(
+                User.full_name.ilike(search_term),
+                User.email.ilike(search_term),
+            )
+        )
+
+    if role:
+        conditions.append(User.role == role)
+
+    if approval_status:
+        conditions.append(
+            User.approval_status == approval_status
+        )
+
+    count_stmt = select(func.count(User.id))
+
+    stmt = (
+        select(User, Department.name)
+        .outerjoin(
+            Department,
+            User.department_id == Department.id,
+        )
+    )
+
+    for condition in conditions:
+        count_stmt = count_stmt.where(condition)
+        stmt = stmt.where(condition)
+
+    total = db.scalar(count_stmt) or 0
+
+    stmt = (
+        stmt.order_by(User.created_at.desc(), User.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    rows = db.execute(stmt).all()
+
+    results = []
+
+    for user, department_name in rows:
+        user_data = AdminUserResponse.model_validate(
+            user
+        ).model_dump()
+
+        user_data["department_name"] = department_name
+
+        results.append(user_data)
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (
+            (total + page_size - 1) // page_size
+        ),
+        "users": results,
     }
