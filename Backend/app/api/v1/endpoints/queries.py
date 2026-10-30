@@ -41,7 +41,13 @@ from app.schemas.query_escalation import (
 )
 from sqlalchemy import select
 from app.models.department import Department
+import logging
 
+from app.models.query import Query
+from app.services.ai_reply_service import generate_ai_reply_draft
+from app.services.query_service import require_query_handler
+
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/queries",
     tags=["Student Queries"]
@@ -72,6 +78,7 @@ def submit_query(
         student_id=current_user.id,
         message=data.message
     )
+
 
 
 @router.post(
@@ -248,6 +255,116 @@ def list_escalated_queries(
         ),
         include_resolved=include_resolved,
     )
+
+
+@router.post("/{query_id}/generate-draft")
+def generate_query_reply_draft(
+    query_id: int,
+    current_user: Annotated[
+        User, Depends(get_current_user)
+    ],
+    db: Annotated[Session, Depends(get_db)],
+):
+    # AI-assisted replies are only for authorized staff.
+    allowed_roles = {
+        "FINANCE_STAFF",
+        "EXAM_STAFF",
+        "IT_STAFF",
+        "HOD",
+        "ADMIN",
+    }
+
+    if current_user.role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail="Only authorized staff can generate reply drafts",
+        )
+
+    # Existing access control checks query ownership
+    # and the staff member's department.
+    query = get_query_details(
+        db=db,
+        query_id=query_id,
+        current_user=current_user,
+    )
+
+    # Preserve existing escalation/HOD ownership rules.
+    require_query_handler(
+        db=db,
+        query=query,
+        current_user=current_user,
+    )
+
+    if query.status in {
+        "PENDING_CLASSIFICATION",
+        "RESOLVED",
+        "CLOSED",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot generate a reply draft in this query status",
+        )
+
+    # Get the query's assigned department.
+    department = (
+        db.get(Department, query.department_id)
+        if query.department_id is not None
+        else None
+    )
+
+    # Fetch the existing conversation.
+    messages = get_query_conversation(
+        db=db,
+        query_id=query_id,
+        current_user=current_user,
+    )
+
+    # Copy ORM values before making an external API call.
+    subject = query.subject or "University Support Query"
+    original_message = query.message
+    department_name = (
+        department.name if department else "University Support"
+    )
+
+    conversation = [
+        {
+            "sender_id": item.sender_id,
+            "message": item.message,
+        }
+        for item in messages[-20:]
+    ]
+
+    # Release the read transaction before calling Gemini.
+    db.rollback()
+
+    try:
+        draft = generate_ai_reply_draft(
+            subject=subject,
+            message=original_message,
+            department_name=department_name,
+            conversation=conversation,
+        )
+
+    except Exception:
+        logger.exception(
+            "Gemini reply draft generation failed for query %s",
+            query_id,
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="AI draft generation is temporarily unavailable",
+        )
+
+    # IMPORTANT:
+    # No db.add(), db.commit(), or reply submission.
+    # The staff member must approve and send separately.
+    return {
+        "query_id": query_id,
+        "draft": draft,
+        "requires_staff_approval": True,
+    }
+
 
 # 3. Individual query details — after static paths
 @router.get(
