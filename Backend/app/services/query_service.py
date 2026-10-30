@@ -29,6 +29,10 @@ from app.repositories.query_repository import save_classification
 from app.services.gemini_service import classify_student_query
 from app.services.n8n_service import send_n8n_event
 from app.services.notification_service import create_notification
+from app.services.notification_service import (
+    create_notification,
+    notify_department_staff,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +313,41 @@ def reply_to_query(
         query.updated_at = datetime.now(timezone.utc)
 
         # Save reply, status update and email notification together
+
+
+        # Create in-app notifications for the new reply.
+        if current_user.role == "STUDENT":
+            # Student replied: notify their department staff.
+            if query.department_id is not None:
+                notify_department_staff(
+                    db=db,
+                    department_id=query.department_id,
+                    notification_type="STUDENT_REPLY",
+                    title=f"Student replied to Query #{query.id}",
+                    message=(
+                        f"A student has replied to Query #{query.id}. "
+                        "Open the conversation to review their response."
+                    ),
+                    query_id=query.id,
+                    exclude_user_id=current_user.id,
+                )
+
+        else:
+            # Staff replied: notify the student.
+            create_notification(
+                db=db,
+                recipient_id=query.student_id,
+                notification_type="QUERY_REPLY",
+                title=f"New reply to Query #{query.id}",
+                message=(
+                    "Your department has replied to your query. "
+                    "Open the conversation to view the response."
+                ),
+                entity_type="QUERY",
+                entity_id=query.id,
+            )
+
+
         db.commit()
         db.refresh(reply)
 
@@ -390,6 +429,18 @@ def update_query_status(
     if new_status == "RESOLVED":
         query.resolved_at = now
 
+        create_notification(
+            db=db,
+            recipient_id=query.student_id,
+            notification_type="QUERY_RESOLVED",
+            title=f"Query #{query.id} resolved",
+            message=(
+                f"Your Query #{query.id} has been resolved "
+                "by the department."
+            ),
+            entity_type="QUERY",
+            entity_id=query.id,
+        )
     try:
         db.commit()
         db.refresh(query)
