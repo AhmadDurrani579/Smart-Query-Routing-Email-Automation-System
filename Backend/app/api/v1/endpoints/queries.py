@@ -261,12 +261,22 @@ def get_single_query(
     ],
     db: Annotated[Session, Depends(get_db)]
 ):
-    return get_query_details(
+    query = get_query_details(
         db=db,
         query_id=query_id,
         current_user=current_user
     )
 
+    department = (
+        db.get(Department, query.department_id)
+        if query.department_id is not None
+        else None
+    )
+
+    return {
+        **QueryResponse.model_validate(query).model_dump(),
+        "department_name": department.name if department else None,
+    }
 
 @router.get(
     "/{query_id}/escalations",

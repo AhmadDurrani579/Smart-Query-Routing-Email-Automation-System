@@ -29,6 +29,8 @@ class QueryResponse(BaseModel):
     needs_manual_review: bool
     assigned_to: int | None
     created_at: datetime
+    responded_at: datetime | None = None
+    resolved_at: datetime | None = None
 
 class QueryStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
