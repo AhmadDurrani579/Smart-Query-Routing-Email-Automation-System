@@ -139,14 +139,23 @@ def queue_classification_notification(
     if recipient is None:
         raise ValueError("Recipient not found")
 
+    eligible_roles = {
+        "FINANCE_STAFF",
+        "EXAM_STAFF",
+        "IT_STAFF",
+        "HOD",
+    }
+
     if (
         not recipient.is_active
         or recipient.approval_status != "APPROVED"
-        or recipient.role != "HOD"
+        or recipient.role not in eligible_roles
         or recipient.department_id != query.department_id
     ):
-        raise ValueError("Recipient is not an eligible department HOD")
-
+        
+        raise ValueError(
+            "Recipient is not an eligible department staff member"
+        )
     recipient_email = recipient.notification_email or recipient.email
 
     subject = f"New Student Query #{query.id} Assigned"

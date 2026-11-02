@@ -21,6 +21,8 @@ from app.repositories.email_notification_repository import (
 )
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+from app.models.email_notification import EmailNotification
 from app.models.query_escalation import QueryEscalation
 
 from app.db.session import SessionLocal
@@ -28,11 +30,11 @@ from app.models.query import Query
 from app.repositories.query_repository import save_classification
 from app.services.gemini_service import classify_student_query
 from app.services.n8n_service import send_n8n_event
-from app.services.notification_service import create_notification
 from app.services.notification_service import (
     create_notification,
     notify_department_staff,
 )
+from app.models.email_notification import EmailNotification
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,7 @@ def submit_student_query(
                 db=classification_db,
                 query=message
             )
+        classification_saved = False
 
         # 3. Save Gemini's classification.
         with SessionLocal() as classification_db:
@@ -87,9 +90,10 @@ def submit_student_query(
                     query=saved_query,
                     classification=classification
                 )
+                classification_saved = True
 
         # 4. Notify n8n if classification succeeded.
-        if not classification.needs_manual_review:
+        if classification_saved and classification.department_id is not None:
             try:
                 sent = send_n8n_event(
                     event="QUERY_CLASSIFIED",
@@ -238,6 +242,75 @@ def require_query_handler(
 
 
 
+def _deliverable_email(user: User) -> str | None:
+    """Exclude reserved example domains used by seeded test accounts."""
+    email = (user.notification_email or user.email or "").strip()
+    if not email or email.rsplit("@", 1)[-1].lower() in {
+        "example.com", "example.org", "example.net"
+    } or email.lower().endswith(".example"):
+        return None
+    return email
+
+
+def _queue_email_once(db: Session, **values) -> None:
+    """Queue without committing; retries won't create duplicate jobs."""
+    db.execute(
+        insert(EmailNotification)
+        .values(**values)
+        .on_conflict_do_nothing(constraint="uq_email_query_recipient_type")
+    )
+
+
+def _queue_student_reply_emails(db: Session, query: Query, reply) -> None:
+    if query.department_id is None:
+        return
+
+    eligible_roles = {"FINANCE_STAFF", "EXAM_STAFF", "IT_STAFF", "HOD"}
+    statement = select(User).where(
+        User.department_id == query.department_id,
+        User.role.in_(eligible_roles),
+        User.is_active.is_(True),
+        User.approval_status == "APPROVED",
+    )
+
+    # For escalated queries, only notify the assigned HOD.
+    if query.escalation_level > 0:
+        escalation = db.scalar(
+            select(QueryEscalation)
+            .where(QueryEscalation.query_id == query.id)
+            .order_by(QueryEscalation.created_at.desc(), QueryEscalation.id.desc())
+        )
+        if escalation is None:
+            return
+        statement = statement.where(
+            User.id == escalation.escalated_to,
+            User.role == "HOD",
+        )
+
+    for recipient in db.scalars(statement).all():
+        address = _deliverable_email(recipient)
+        if address is None:
+            continue
+
+        _queue_email_once(
+            db,
+            query_id=query.id,
+            recipient_user_id=recipient.id,
+            # Unique per student message, so later student replies are emailed too.
+            notification_type=f"STUDENT_REPLY_{reply.id}",
+            recipient_email=address,
+            subject=f"Student replied to Query #{query.id}",
+            body=(
+                f"Hello {recipient.full_name or 'Department Staff'},\n\n"
+                f"A student has replied to Query #{query.id}.\n"
+                "Please log in to CampusIQ to read the message.\n\n"
+                "Regards,\nCampusIQ"
+            ),
+            status="PENDING",
+            attempt_count=0,
+        )
+
+
 def reply_to_query(
     db: Session,
     query_id: int,
@@ -304,6 +377,7 @@ def reply_to_query(
                     )
                 )
 
+
             if query.responded_at is None:
                 query.responded_at = datetime.now(timezone.utc)
 
@@ -331,6 +405,7 @@ def reply_to_query(
                     query_id=query.id,
                     exclude_user_id=current_user.id,
                 )
+                _queue_student_reply_emails(db, query, reply)
 
         else:
             # Staff replied: notify the student.
@@ -426,6 +501,54 @@ def update_query_status(
     query.status = new_status
     query.updated_at = now
 
+
+    if new_status == "IN_PROGRESS":
+
+        # 1. Create an in-app notification for the student.
+        create_notification(
+            db=db,
+            recipient_id=query.student_id,
+            notification_type="QUERY_IN_PROGRESS",
+            title=f"Query #{query.id} is in progress",
+            message=(
+                f"Your Query #{query.id} is now being reviewed "
+                "by the department."
+            ),
+            entity_type="QUERY",
+            entity_id=query.id,
+        )
+
+        # 2. Retrieve the student's email address.
+        student = db.get(User, query.student_id)
+
+        recipient_email = (
+            (student.notification_email or student.email)
+            if student else None
+        )
+
+        # 3. Queue an email for n8n automatic delivery.
+        if recipient_email:
+            db.add(
+                EmailNotification(
+                    query_id=query.id,
+                    recipient_user_id=student.id,
+                    notification_type="QUERY_IN_PROGRESS",
+                    recipient_email=recipient_email,
+                    subject=f"Query #{query.id} - Status Update",
+                    body=(
+                        "Dear Student,\n\n"
+                        f"Your Query #{query.id} is now In Progress.\n"
+                        "The department is reviewing your request.\n"
+                        "You will be notified once your query is resolved.\n\n"
+                        "Regards,\n"
+                        "CampusIQ Support Team"
+                    ),
+                    status="PENDING",
+                    attempt_count=0,
+                )
+            )
+
+
     if new_status == "RESOLVED":
         query.resolved_at = now
 
@@ -441,6 +564,27 @@ def update_query_status(
             entity_type="QUERY",
             entity_id=query.id,
         )
+
+        student = db.get(User, query.student_id)
+        if student is not None:
+            address = _deliverable_email(student)
+            if address is not None:
+                _queue_email_once(
+                    db,
+                    query_id=query.id,
+                    recipient_user_id=student.id,
+                    notification_type="QUERY_RESOLVED",
+                    recipient_email=address,
+                    subject=f"Query #{query.id} resolved",
+                    body=(
+                        "Dear Student,\n\n"
+                        f"Your Query #{query.id} has been marked as resolved.\n"
+                        "Log in to CampusIQ to review the response.\n\n"
+                        "Regards,\nCampusIQ Support Team"
+                    ),
+                    status="PENDING",
+                    attempt_count=0,
+                )
     try:
         db.commit()
         db.refresh(query)
