@@ -35,8 +35,12 @@ from app.services.notification_service import (
     notify_department_staff,
 )
 from app.models.email_notification import EmailNotification
+from app.services.email_notification_service import (
+    queue_student_confirmation,
+)
 
 logger = logging.getLogger(__name__)
+
 
 
 def submit_student_query(
@@ -51,6 +55,7 @@ def submit_student_query(
         message=message
     )
 
+    # Create an in-app notification for the student.
     create_notification(
         db=db,
         recipient_id=student_id,
@@ -62,23 +67,47 @@ def submit_student_query(
     )
 
     db.commit()
-
     query_id = query.id
 
-    # 2. Automatically classify using Gemini.
+    # 2. Queue a confirmation email for the student.
+    # Use a separate session so an email queue failure
+    # does not interrupt the successful query submission.
     try:
-        # Use a separate session for the AI classification,
-        # following the existing worker design.
+        with SessionLocal() as email_db:
+            result = queue_student_confirmation(
+                db=email_db,
+                query_id=query_id,
+            )
+
+            logger.info(
+                "Student confirmation for query %s: %s",
+                query_id,
+                result["status"],
+            )
+
+    except Exception:
+        logger.exception(
+            "Student confirmation email could not be queued "
+            "for query %s",
+            query_id,
+        )
+
+    # 3. Automatically classify the query using Gemini.
+    try:
         with SessionLocal() as classification_db:
             classification = classify_student_query(
                 db=classification_db,
                 query=message
             )
+
         classification_saved = False
 
-        # 3. Save Gemini's classification.
+        # 4. Save the AI classification in Neon.
         with SessionLocal() as classification_db:
-            saved_query = classification_db.get(Query, query_id)
+            saved_query = classification_db.get(
+                Query,
+                query_id
+            )
 
             if (
                 saved_query is not None
@@ -90,10 +119,14 @@ def submit_student_query(
                     query=saved_query,
                     classification=classification
                 )
+
                 classification_saved = True
 
-        # 4. Notify n8n if classification succeeded.
-        if classification_saved and classification.department_id is not None:
+        # 5. Trigger the existing n8n department workflow.
+        if (
+            classification_saved
+            and classification.department_id is not None
+        ):
             try:
                 sent = send_n8n_event(
                     event="QUERY_CLASSIFIED",
@@ -102,29 +135,39 @@ def submit_student_query(
                     priority=classification.priority
                 )
 
-                if not sent:
+                if sent:
+                    logger.info(
+                        "n8n classification event sent for query %s",
+                        query_id,
+                    )
+                else:
                     logger.warning(
                         "Query %s classified but n8n notification failed",
-                        query_id
+                        query_id,
                     )
+
             except Exception:
                 logger.exception(
                     "n8n notification failed for query %s",
-                    query_id
+                    query_id,
                 )
 
     except Exception:
         logger.exception(
             "Automatic Gemini classification failed for query %s",
-            query_id
+            query_id,
         )
 
         # The query remains saved as PENDING_CLASSIFICATION.
-        # A worker can retry it later.
+        # A worker can retry classification later.
 
-    # 5. Reload the updated query from Neon.
+    # 6. Reload the updated query from Neon.
     db.expire_all()
-    updated_query = db.get(Query, query_id)
+
+    updated_query = db.get(
+        Query,
+        query_id
+    )
 
     return updated_query
 

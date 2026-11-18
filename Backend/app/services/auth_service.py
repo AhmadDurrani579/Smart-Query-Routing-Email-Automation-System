@@ -9,7 +9,7 @@ from app.repositories.user_repository import (
     create_user
 )
 from app.schemas.auth import SignupRequest
-
+from app.repositories.department_repository import get_department_by_id
 from app.core.security import (
     verify_password,
     create_access_token,
@@ -17,7 +17,6 @@ from app.core.security import (
 )
 
 from app.schemas.auth import LoginRequest
-
 
 def signup_user(db: Session, data: SignupRequest):
     email = str(data.email).strip().lower()
@@ -30,6 +29,18 @@ def signup_user(db: Session, data: SignupRequest):
             detail="Email already registered"
         )
 
+    # Validate the selected department.
+    department = get_department_by_id(
+        db=db,
+        department_id=data.department_id
+    )
+
+    if department is None or not department.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid or inactive department"
+        )
+
     hashed_password = hash_password(data.password)
 
     try:
@@ -38,7 +49,7 @@ def signup_user(db: Session, data: SignupRequest):
             full_name=data.full_name,
             email=email,
             hashed_password=hashed_password,
-            requested_role=data.requested_role.value
+            department_id=data.department_id
         )
 
         return user
@@ -51,6 +62,7 @@ def signup_user(db: Session, data: SignupRequest):
             detail="Registration could not be completed"
         )
 
+    
 
 def login_user(db: Session, data: LoginRequest):
     # 1. Find user by email

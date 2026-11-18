@@ -209,3 +209,81 @@ def queue_classification_notification(
         "created": created,
         "status": "QUEUED" if created else "ALREADY_EXISTS",
     }
+
+
+def queue_student_confirmation(
+    db: Session,
+    query_id: int,
+):
+    # Find the submitted query.
+    query = db.get(Query, query_id)
+
+    if query is None:
+        raise ValueError("Query not found")
+
+    # Find the student who submitted the query.
+    student = db.get(User, query.student_id)
+
+    if student is None:
+        raise ValueError("Student not found")
+
+    recipient_email = (
+        student.notification_email or student.email
+    )
+
+    if not recipient_email:
+        raise ValueError("Student has no email address")
+
+    subject = f"CampusIQ - Query #{query.id} Submitted"
+
+    body = (
+        f"Hello {student.full_name or 'Student'},\n\n"
+        "Your query has been submitted successfully "
+        "to CampusIQ.\n\n"
+        f"Query ID: {query.id}\n"
+        f"Current Status: {query.status}\n\n"
+        "Our system will process your query and "
+        "route it to the appropriate department.\n\n"
+        "You can track your query status in "
+        "the CampusIQ dashboard.\n\n"
+        "Regards,\n"
+        "CampusIQ Team"
+    )
+
+    statement = (
+        insert(EmailNotification)
+        .values(
+            query_id=query.id,
+            recipient_user_id=student.id,
+            notification_type="QUERY_SUBMITTED",
+            recipient_email=recipient_email,
+            subject=subject,
+            body=body,
+            status="PENDING",
+            attempt_count=0,
+        )
+        .on_conflict_do_nothing(
+            constraint="uq_email_query_recipient_type"
+        )
+        .returning(EmailNotification.id)
+    )
+
+    notification_id = db.scalar(statement)
+    created = notification_id is not None
+
+    if not created:
+        notification_id = db.scalar(
+            select(EmailNotification.id).where(
+                EmailNotification.query_id == query_id,
+                EmailNotification.recipient_user_id == student.id,
+                EmailNotification.notification_type == "QUERY_SUBMITTED",
+            )
+        )
+
+    db.commit()
+
+    return {
+        "notification_id": notification_id,
+        "created": created,
+        "status": "QUEUED" if created else "ALREADY_EXISTS",
+    }

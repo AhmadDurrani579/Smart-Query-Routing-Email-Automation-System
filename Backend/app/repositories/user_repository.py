@@ -20,20 +20,22 @@ def get_user_by_email(
     return db.scalar(statement)
 
 
+
 def create_user(
     db: Session,
     *,
     full_name: str,
     email: str,
     hashed_password: str,
-    requested_role: str
+    department_id: int
 ) -> User:
     user = User(
         full_name=full_name,
         email=email,
         hashed_password=hashed_password,
+        department_id=department_id,
         role="STUDENT",
-        requested_role=requested_role,
+        requested_role="STUDENT",
         approval_status="PENDING",
         is_active=False
     )

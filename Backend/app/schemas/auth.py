@@ -21,7 +21,7 @@ class SignupRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-    requested_role: SignupRole
+    department_id: int = Field(gt=0)
 
     @field_validator("full_name")
     @classmethod
