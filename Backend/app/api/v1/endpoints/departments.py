@@ -29,20 +29,20 @@ router = APIRouter(
     tags=["Departments"]
 )
 
-
 @router.get(
     "",
     response_model=list[DepartmentResponse]
 )
 def list_departments(
-    current_user: Annotated[
-        User, Depends(get_current_user)
-    ],
-    db: Annotated[
-        Session, Depends(get_db)
-    ]
+    db: Annotated[Session, Depends(get_db)]
 ):
-    return get_all_departments(db)
+    departments = get_all_departments(db)
+
+    return [
+        department
+        for department in departments
+        if department.is_active
+    ]
 
 
 @router.get(
